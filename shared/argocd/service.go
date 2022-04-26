@@ -134,7 +134,7 @@ func (svc *argoCDService) GetAppDetails(ctx context.Context, appSource *v1alpha1
 
 		if appSource.Helm.Values != "" {
 			output := map[string]string{}
-			var valuesMap map[string]interface{}
+			var valuesMap map[interface{}]interface{}
 			if err := json.Unmarshal([]byte(appSource.Helm.Values), valuesMap); err != nil {
 				return nil, fmt.Errorf("failed to parse appSource.Helm.Values: %s", err)
 			}
