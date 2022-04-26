@@ -2,7 +2,9 @@ package argocd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/argoproj-labs/argocd-notifications/expr/shared"
 	"github.com/argoproj/argo-cd/v2/common"
@@ -117,10 +119,8 @@ func (svc *argoCDService) GetAppDetails(ctx context.Context, appSource *v1alpha1
 	if err != nil {
 		return nil, err
 	}
-
 	var has *shared.HelmAppSpec
 	if appDetail.Helm != nil {
-
 		if appSource.Helm.Parameters != nil {
 			for _, overrideParam := range appSource.Helm.Parameters {
 				for _, defaultParam := range appDetail.Helm.Parameters {
@@ -132,11 +132,32 @@ func (svc *argoCDService) GetAppDetails(ctx context.Context, appSource *v1alpha1
 			}
 		}
 
+		if appSource.Helm.Values != "" {
+			output := map[string]string{}
+			var valuesMap map[string]interface{}
+			if err := json.Unmarshal([]byte(appSource.Helm.Values), valuesMap); err != nil {
+				return nil, fmt.Errorf("failed to parse appSource.Helm.Values: %s", err)
+			}
+			flatVals(valuesMap, output)
+
+			for i := range has.Parameters {
+				if v, ok := output[has.Parameters[i].Name]; ok {
+					has.Parameters[i].Value = v
+					delete(output, has.Parameters[i].Name)
+					break
+				}
+			}
+
+			for k, v := range output {
+				appDetail.Helm.Parameters = append(appDetail.Helm.Parameters, &v1alpha1.HelmParameter{Name: k, Value: v})
+			}
+		}
+
 		has = &shared.HelmAppSpec{
 			Name:           appDetail.Helm.Name,
-			ValueFiles:     appDetail.Helm.ValueFiles,
+			ValueFiles:     appSource.Helm.ValueFiles,
 			Parameters:     appDetail.Helm.Parameters,
-			Values:         appDetail.Helm.Values,
+			Values:         appSource.Helm.Values,
 			FileParameters: appDetail.Helm.FileParameters,
 		}
 	}
@@ -151,4 +172,20 @@ func (svc *argoCDService) GetAppDetails(ctx context.Context, appSource *v1alpha1
 
 func (svc *argoCDService) Close() {
 	svc.dispose()
+}
+
+func flatVals(input interface{}, output map[string]string, prefixes ...string) {
+	switch i := input.(type) {
+	case map[string]interface{}:
+		for k, v := range i {
+			flatVals(v, output, append(prefixes, k)...)
+		}
+	case []interface{}:
+		p := append([]string(nil), prefixes...)
+		for j, v := range i {
+			flatVals(v, output, append(p[0:len(p)-1], fmt.Sprintf("%s[%v]", prefixes[len(p)-1], j))...)
+		}
+	default:
+		output[strings.Join(prefixes, ".")] = fmt.Sprintf("%v", i)
+	}
 }
